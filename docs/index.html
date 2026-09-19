@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+	<title>Gridiron Gang</title>
+	<style>
+		html,body { margin:0; width:100%; height:100%; overflow:hidden; overscroll-behavior:none; background:#10151c; color:#f3f4f6; font:16px system-ui,sans-serif; }
+		#canvas { display:block; width:100%; height:100%; outline:none; touch-action:none; }
+		#status { position:fixed; inset:0; display:grid; place-content:center; gap:18px; padding:24px; text-align:center; background:#10151c; }
+		#status[hidden],#reload[hidden] { display:none; }
+		#status-progress { width:min(320px,80vw); accent-color:#f38b45; }
+		#reload { border:0; border-radius:10px; padding:14px 24px; background:#f38b45; color:#10151c; font:600 16px system-ui,sans-serif; }
+	</style>
+	<link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
+<link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
+
+</head>
+<body>
+	<canvas id="canvas" tabindex="0" width="1280" height="720">Your browser does not support the game canvas.</canvas>
+	<div id="status" role="status"><span id="status-label">Build your crew. Own the field.</span><progress id="status-progress"></progress><button id="reload" hidden>Reload game</button></div>
+	<noscript>This game needs JavaScript enabled.</noscript>
+	<script src="index.js"></script>
+	<script>
+	(function () {
+		'use strict';
+		const config = {"args":[],"canvasResizePolicy":0,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.wasm":38047590,"game-3e0cdb46aebdec27.pck":1267672},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4,"mainPack":"game-3e0cdb46aebdec27.pck"};
+		const canvas = document.getElementById('canvas');
+		const status = document.getElementById('status');
+		const label = document.getElementById('status-label');
+		const progress = document.getElementById('status-progress');
+		const reload = document.getElementById('reload');
+		const storageKey = 'gridiron_runtime_diagnostics_v1';
+		let previous = null;
+		try { previous = JSON.parse(localStorage.getItem(storageKey)); } catch (_) {}
+		function runSummary(run) {
+			if (!run || typeof run !== 'object') return null;
+			return {state:run.state,startedAt:run.startedAt,lastSeenAt:run.lastSeenAt,build:run.build,canvas:run.canvas,context:run.context,
+				faults:Array.isArray(run.faults) ? run.faults.slice(-6) : [],events:Array.isArray(run.events) ? run.events.slice(-12) : []};
+		}
+		const diagnostic = {
+			version:3, startedAt:Date.now(), lastSeenAt:Date.now(), state:'starting', events:[], faults:[],
+			build:config.mainPack || config.executable, browser:navigator.userAgent,
+			previous:runSummary(previous)
+		};
+		// Retain the last interrupted run through later clean reloads. This is a
+		// breadcrumb, not proof of a crash: force-closing a tab can look identical.
+		diagnostic.interrupted = previous && ['running','fault'].includes(previous.state) ? runSummary(previous) : runSummary(previous && previous.interrupted);
+		let lastStoredAt = 0;
+		// Diagnostics stay on this browser, contain no club data, and are bounded.
+		function record(kind, detail) {
+			diagnostic.lastSeenAt = Date.now();
+			const entry = {at:Date.now(),kind:kind,detail:String(detail || '').slice(0,600)};
+			diagnostic.events.push(entry);
+			if (['error','rejection','engine','fault'].includes(kind)) {
+				diagnostic.faults.push(entry);
+				if (diagnostic.faults.length > 6) diagnostic.faults.shift();
+			}
+			if (diagnostic.events.length > 12) diagnostic.events.shift();
+			const urgent = ['boot','started','fault','pagehide','reload'].includes(kind);
+			if (urgent || Date.now()-lastStoredAt >= 1000) {
+				try { localStorage.setItem(storageKey,JSON.stringify(diagnostic)); } catch (_) {}
+				lastStoredAt = Date.now();
+			}
+		}
+		window.GridironRuntime = {note(info) {
+			const context = {};
+			for (const key of ['stage','audioMode','staticBytes','nodes','resources','mode','phase','playSeconds','ballFlight','kickStage','sound','lastAbility','cachedSounds','fps','fpsLimit','objects','drawCalls','renderBytes']) {
+				const value = info[key];
+				if (typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value)) context[key] = value;
+				else if (typeof value === 'string') context[key] = value.slice(0,80);
+			}
+			diagnostic.context = context;
+			record('heartbeat','');
+		}};
+		let resizeTimer = null;
+		let resizeCount = 0;
+		function fitCanvas() {
+			const width = Math.max(1,Math.round(window.innerWidth));
+			const height = Math.max(1,Math.round(window.innerHeight));
+			const scale = Math.min(window.devicePixelRatio || 1,1280/Math.max(width,height),Math.sqrt(921600/(width*height)));
+			const nextWidth = Math.max(1,Math.floor(width*scale));
+			const nextHeight = Math.max(1,Math.floor(height*scale));
+			if (canvas.width !== nextWidth || canvas.height !== nextHeight) {
+				if (canvas.width !== nextWidth) canvas.width = nextWidth;
+				if (canvas.height !== nextHeight) canvas.height = nextHeight;
+				resizeCount++;
+			}
+			diagnostic.canvas = {width:nextWidth,height:nextHeight,pixelRatio:window.devicePixelRatio || 1,resizeCount};
+		}
+		function scheduleResize() {
+			if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+			resizeTimer = window.setTimeout(() => { resizeTimer = null; fitCanvas(); },180);
+		}
+		function failure(message, detail) {
+			diagnostic.state = 'fault';
+			record('fault',detail || message);
+			label.textContent = message;
+			progress.hidden = true;
+			reload.hidden = false;
+			status.hidden = false;
+		}
+		fitCanvas();
+		record('boot','');
+		window.addEventListener('resize',scheduleResize);
+		window.addEventListener('orientationchange',scheduleResize);
+		window.addEventListener('error',event => record('error',event.message));
+		window.addEventListener('unhandledrejection',event => record('rejection',event.reason && event.reason.message || event.reason));
+		window.addEventListener('pagehide',event => { diagnostic.state = 'pagehide'; record('pagehide',event.persisted ? 'cached' : 'leaving'); });
+		window.addEventListener('pageshow',event => { if (event.persisted) { diagnostic.state = 'running'; record('started','restored tab'); } });
+		document.addEventListener('visibilitychange',() => record('visibility',document.visibilityState));
+		canvas.addEventListener('webglcontextlost',event => {
+			event.preventDefault();
+			failure('Graphics interrupted. Reload to continue.','webglcontextlost');
+		});
+		// Never reload automatically: a restart must be a deliberate action.
+		reload.addEventListener('click',() => { record('reload','user requested'); window.location.reload(); });
+		config.canvas = canvas;
+		config.canvasResizePolicy = 0;
+		config.onExit = code => failure('The game stopped. Reload to continue.','engine exit '+code);
+		config.onPrintError = message => { console.error(message); record('engine',message); };
+		const engine = new Engine(config);
+		const missing = Engine.getMissingFeatures({threads:false});
+		if (missing.length) {
+			failure('This browser could not start the game.','missing '+missing.join(', '));
+			return;
+		}
+		engine.startGame({onProgress:(current,total) => {
+			if (total > 0) { progress.value = current; progress.max = total; }
+			else progress.removeAttribute('value');
+		}}).then(() => {
+			diagnostic.state = 'running';
+			record('started','');
+			status.hidden = true;
+			canvas.focus();
+		},error => failure('The game could not load. Reload to try again.',error && error.message || error));
+	}());
+	</script>
+</body>
+</html>

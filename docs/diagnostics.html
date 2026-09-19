@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gridiron Gang — local diagnostics</title>
+<style>
+body { margin:0 auto; max-width:850px; padding:24px; background:#10151c; color:#f3f4f6; font:16px system-ui,sans-serif; }
+h1 { font-size:24px; } p { line-height:1.5; } a { color:#f3a76e; }
+button { padding:12px 20px; border:0; border-radius:8px; background:#f38b45; color:#10151c; font:600 16px system-ui,sans-serif; }
+pre { padding:16px; background:#1d2631; border-radius:8px; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; }
+</style>
+<h1>Local diagnostics</h1>
+<p>This report stays on this browser. It contains recent game activity and errors, without your roster or save file. Nothing is sent automatically.</p>
+<button id="copy" type="button">Copy report</button>
+<p id="status" role="status"></p>
+<pre id="report"></pre>
+<a href="./">Back to game</a>
+<script>
+'use strict';
+const report = document.getElementById('report');
+const status = document.getElementById('status');
+try {
+  const saved = localStorage.getItem('gridiron_runtime_diagnostics_v1');
+  report.textContent = saved ? JSON.stringify(JSON.parse(saved),null,2) : 'No report saved in this browser yet.';
+} catch (_) { report.textContent = 'The browser could not read the local report.'; }
+document.getElementById('copy').addEventListener('click',async () => {
+  try { await navigator.clipboard.writeText(report.textContent); status.textContent = 'Report copied.'; }
+  catch (_) { status.textContent = 'Select the report below to copy it manually.'; }
+});
+</script>
+</html>
